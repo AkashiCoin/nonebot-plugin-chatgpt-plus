@@ -10,7 +10,6 @@
 
 _✨ ChatGPT AI 对话 ✨_
 
-
 <a href="./LICENSE">
     <img src="https://img.shields.io/github/license/A-kirami/nonebot-plugin-chatgpt.svg" alt="license">
 </a>
@@ -23,7 +22,9 @@ _✨ ChatGPT AI 对话 ✨_
 
 ## 📖 介绍
 
-智能对话聊天插件。
+项目原项目为[https://github.com/A-kirami/nonebot-plugin-chatgpt](https://github.com/A-kirami/nonebot-plugin-chatgpt)，此项目核心为使用绕过Cloudflare的api
+
+免费、无限使用的ChatGPT，PLUS账号可使用ChatGPT4.0，绕过ChatGPT的Cloudflare盾来使用免费网页端ChatGPT
 
 ## 💿 安装
 
@@ -31,7 +32,7 @@ _✨ ChatGPT AI 对话 ✨_
 <summary>使用 nb-cli 安装</summary>
 在 nonebot2 项目的根目录下打开命令行, 输入以下指令即可安装
 
-    nb plugin install nonebot-plugin-chatgpt
+    nb plugin install nonebot-plugin-chatgpt-plus
 
 </details>
 
@@ -42,27 +43,27 @@ _✨ ChatGPT AI 对话 ✨_
 <details>
 <summary>pip</summary>
 
-    pip install nonebot-plugin-chatgpt
+    pip install nonebot-plugin-chatgpt-plus
 </details>
 <details>
 <summary>pdm</summary>
 
-    pdm add nonebot-plugin-chatgpt
+    pdm add nonebot-plugin-chatgpt-plus
 </details>
 <details>
 <summary>poetry</summary>
 
-    poetry add nonebot-plugin-chatgpt
+    poetry add nonebot-plugin-chatgpt-plus
 </details>
 <details>
 <summary>conda</summary>
 
-    conda install nonebot-plugin-chatgpt
+    conda install nonebot-plugin-chatgpt-plus
 </details>
 
 打开 nonebot2 项目的 `bot.py` 文件, 在其中写入
 
-    nonebot.load_plugin('nonebot_plugin_chatgpt')
+    nonebot.load_plugin('nonebot_plugin_chatgpt_plus')
 
 </details>
 
@@ -76,6 +77,8 @@ _✨ ChatGPT AI 对话 ✨_
 | 配置项 | 必填 | 默认值 | 说明 |
 |:-----:|:----:|:----:|:----:|
 | CHATGPT_SESSION_TOKEN | 否 | 空字符串 | ChatGPT 的 session_token，如配置则优先使用 |
+| CHATGPT_PUID | 否 | 空字符串 | ChatGPT PLUS账号的puid，使用官方API必填 |
+| CHATGPT_MODEL | 否 | 空字符串 | 模型，免费账号只有一个，PLUS账号可使用`gpt-4` |
 | CHATGPT_ACCOUNT | 否 | 空字符串 | ChatGPT 登陆邮箱，未配置则使用 session_token |
 | CHATGPT_PASSWORD | 否 | 空字符串 | ChatGPT 登陆密码，未配置则使用 session_token |
 | CHATGPT_CD_TIME | 否 | 60 | 冷却时间，单位：秒|
@@ -84,16 +87,19 @@ _✨ ChatGPT AI 对话 ✨_
 | CHATGPT_COMMAND | 否 | 空字符串 | 触发聊天的命令，可以是 `字符串` 或者 `字符串列表`。<br>如果为空字符串或者空列表，则默认响应全部消息  |
 | CHATGPT_TO_ME | 否 | True | 是否需要@机器人 |
 | CHATGPT_TIMEOUT | 否 | 30 | 请求服务器的超时时间，单位：秒 |
-| CHATGPT_API | 否 | https://chat.openai.com/ | API 地址，可配置反代 |
+| CHATGPT_API | 否 | https://chat.loli.vet/ | API 地址，可配置反代，默认值可绕CF盾 |
 | CHATGPT_IMAGE | 否 | False | 是否以图片形式发送。<br>如果无法显示文字，请[点击此处](https://github.com/kexue-z/nonebot-plugin-htmlrender#%E5%B8%B8%E8%A7%81%E7%96%91%E9%9A%BE%E6%9D%82%E7%97%87)查看解决办法 |
 | CHATGPT_IMAGE_WIDTH | 否 | 500 | 消息图片宽度，单位：像素 |
-| CHATGPT_PRIORITY | 否 | 999 | 事件响应器优先级 |
+| CHATGPT_PRIORITY | 否 | 98 | 事件响应器优先级 |
 | CHATGPT_BLOCK | 否 | True | 是否阻断消息传播 |
 | CHATGPT_PRIVATE | 否 | True | 是否允许私聊使用 |
 | CHATGPT_SCOPE | 否 | private | 设置公共会话或私有会话<br>private：私有会话，群内成员会话各自独立<br>public：公共对话，群内成员共用同一会话 |
 | CHATGPT_DATA | 否 | 插件目录下 | 插件数据保存目录的路径 |
-| CHATGPT_MAX_ROLLBACK | 否 | 5 | 设置最多支持回滚多少会话 |
-| CHATGPT_DETAILED_ERROR | 否 | 否 | 是否允许输出详细错误信息 |
+| CHATGPT_MAX_ROLLBACK | 否 | 8 | 设置最多支持回滚多少会话 |
+
+
+
+
 
 ### 获取 session_token
 
@@ -119,6 +125,8 @@ _✨ ChatGPT AI 对话 ✨_
 | 查看会话/查看对话 | 是 | 群聊/私聊 | 查看已保存的所有会话 |
 | 切换会话/切换对话 + 会话名称 | 是 | 群聊/私聊 | 切换到指定的会话 |
 | 回滚会话/回滚对话 | 是 | 群聊/私聊 | 返回到之前的会话，输入数字可以返回多个会话，但不可以超过最大支持数量 |
+| 刷新token | 是 | 群聊/私聊 | 超级用户可用，用于session刷新测试 |
+| 清空会话 | 是 | 群聊/私聊 | 超级用户可用，用于账号切换后，保存的会话不存在的情况 |
 
 
 ## 🤝 贡献

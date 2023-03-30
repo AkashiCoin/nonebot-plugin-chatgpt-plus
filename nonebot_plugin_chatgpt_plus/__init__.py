@@ -6,32 +6,67 @@ from nonebot.adapters.onebot.v11 import (
     MessageSegment,
 )
 from nonebot.log import logger
+from nonebot.plugin import PluginMetadata
+from nonebot.permission import SUPERUSER
 from nonebot.params import CommandArg, _command_arg, _command_start
 from nonebot.rule import to_me
 from nonebot.typing import T_State
 
-from playwright._impl._api_types import Error as PlaywrightAPIError
-
 from .chatgpt import Chatbot
 from .config import config
-from .data import setting
 from .utils import Session, cooldow_checker, create_matcher
+from .data import setting
 
-require("nonebot_plugin_apscheduler")
+# require("nonebot_plugin_apscheduler")
 
 from nonebot_plugin_apscheduler import scheduler
 
-require("nonebot_plugin_htmlrender")
+if config.chatgpt_image:
+    # require("nonebot_plugin_htmlrender")
 
-from nonebot_plugin_htmlrender import md_to_pic
+    from nonebot_plugin_htmlrender import md_to_pic
 
+
+__zx_plugin_name__ = "ChatGPT-PLUS"
+__plugin_meta__ = PluginMetadata(
+    name="ChatGPT-PLUS",
+    description="ChatGPT PLUS插件",
+    usage="触发方式：gpt3 | gpt4 触发相应版本ChatGPT",
+    extra={
+        "unique_name": "chatgpt",
+        "example": """
+刷新会话/刷新对话	重置会话记录，开始新的对话
+导出会话/导出对话	导出当前会话记录
+导入会话/导入对话 + 会话ID + 父消息ID(可选)	将会话记录导入，这会替换当前的会话
+保存会话/保存对话 + 会话名称	将当前会话保存
+查看会话/查看对话	查看已保存的所有会话
+切换会话/切换对话 + 会话名称	切换到指定的会话
+回滚会话/回滚对话	返回到之前的会话，输入数字可以返回多个会话，但不可以超过最大支持数量""",
+        "author": "A-kirami",
+        "version": "0.7.0",
+    },
+)
+__plugin_settings__ = {
+    "level": 5,
+    "default_status": True,
+    "limit_superuser": False,
+    "cmd": [
+        "ChatGPT4.0",
+        "ChatGPT-PLUS",
+        "gpt3",
+        "gpt4",
+    ],
+}
 
 chat_bot = Chatbot(
     token=setting.token or config.chatgpt_session_token,
+    puid=setting.puid or config.chatgpt_puid,
+    model=config.chatgpt_model,
     account=config.chatgpt_account,
     password=config.chatgpt_password,
     api=config.chatgpt_api,
     proxies=config.chatgpt_proxies,
+    preset=config.chatgpt_preset,
     timeout=config.chatgpt_timeout,
 )
 
@@ -56,42 +91,50 @@ def check_purview(event: MessageEvent) -> bool:
 
 @matcher.handle(parameterless=[cooldow_checker(config.chatgpt_cd_time)])
 async def ai_chat(event: MessageEvent, state: T_State) -> None:
-    if not chat_bot.content:
-        await chat_bot.playwright_start()
     message = _command_arg(state) or event.get_message()
     text = message.extract_plain_text().strip()
     if start := _command_start(state):
-        text = text[len(start):]
+        text = text[len(start) :]
+    if event.get_message().extract_plain_text().strip().startswith("gpt4"):
+        chat_bot.model = "gpt-4"
+    else:
+        chat_bot.model = config.chatgpt_model
+    has_title = True
+    played_name = config.chatgpt_default_preset
+    cvst = session[event]
+    if cvst:
+        if not cvst['conversation_id']:
+            has_title = False
+    else:
+        has_title = False
+    if not has_title:
+        for name in chat_bot.preset:
+            if text.find(name) > -1:
+                played_name = name
     try:
-        msg = await chat_bot(**session[event]).get_chat_response(text)
-        if (msg == "token失效，请重新设置token") and (
-            chat_bot.session_token != config.chatgpt_session_token
+        msg = await chat_bot(**cvst, played_name=played_name).get_chat_response(text)
+        if (
+            msg == "token失效，请重新设置token"
+            and chat_bot.session_token != config.chatgpt_session_token
         ):
-            await chat_bot.set_cookie(config.chatgpt_session_token)
-            msg = await chat_bot(**session[event]).get_chat_response(text)
-    except PlaywrightAPIError as e:
+            chat_bot.session_token = config.chatgpt_session_token
+            msg = await chat_bot(**cvst, played_name=played_name).get_chat_response(text)
+    except Exception as e:
         error = f"{type(e).__name__}: {e}"
         logger.opt(exception=e).error(f"ChatGPT request failed: {error}")
-        if type(e).__name__ == "TimeoutError":
-            await matcher.finish(
-                "ChatGPT回复已超时。", at_sender=True
-            )
-        elif type(e).__name__ == "Error":
-            msg = "ChatGPT 目前无法回复您的问题。"
-            if config.chatgpt_detailed_error:
-                msg += f"\n{error}"
-            else:
-                msg += "可能的原因是同时提问过多，问题过于复杂等。"
-            await matcher.finish(
-                msg, at_sender=True
-            )
+        await matcher.finish(
+            f"请求 ChatGPT 服务器时出现问题，请稍后再试\n错误信息: {error}", reply_message=True
+        )
     if config.chatgpt_image:
         if msg.count("```") % 2 != 0:
             msg += "\n```"
         img = await md_to_pic(msg, width=config.chatgpt_image_width)
         msg = MessageSegment.image(img)
-    await matcher.send(msg, at_sender=True)
+    await matcher.send(msg, reply_message=True)
     session[event] = chat_bot.conversation_id, chat_bot.parent_id
+    if not has_title and session[event]["conversation_id"]:
+        await chat_bot(**session[event]).edit_title(session.id(event=event))
+        session.save_sessions()
 
 
 refresh = on_command("刷新对话", aliases={"刷新会话"}, block=True, rule=to_me(), priority=1)
@@ -101,7 +144,8 @@ refresh = on_command("刷新对话", aliases={"刷新会话"}, block=True, rule=
 async def refresh_conversation(event: MessageEvent) -> None:
     if not check_purview(event):
         await import_.finish("当前为公共会话模式, 仅支持群管理操作")
-    del session[event]
+    session[event]['conversation_id'].append(None)
+    session[event]['parent_id'].append(chat_bot.id)
     await refresh.send("当前会话已刷新")
 
 
@@ -115,10 +159,10 @@ async def export_conversation(event: MessageEvent) -> None:
             f"已成功导出会话:\n"
             f"会话ID: {cvst['conversation_id'][-1]}\n"
             f"父消息ID: {cvst['parent_id'][-1]}",
-            at_sender=True,
+            reply_message=True,
         )
     else:
-        await export.finish("你还没有任何会话记录", at_sender=True)
+        await export.finish("你还没有任何会话记录", reply_message=True)
 
 
 import_ = on_command(
@@ -132,11 +176,11 @@ async def import_conversation(event: MessageEvent, arg: Message = CommandArg()) 
         await import_.finish("当前为公共会话模式, 仅支持群管理操作")
     args = arg.extract_plain_text().strip().split()
     if not args:
-        await import_.finish("至少需要提供会话ID", at_sender=True)
+        await import_.finish("至少需要提供会话ID", reply_message=True)
     if len(args) > 2:
-        await import_.finish("提供的参数格式不正确", at_sender=True)
+        await import_.finish("提供的参数格式不正确", reply_message=True)
     session[event] = args.pop(0), args[0] if args else None
-    await import_.send("已成功导入会话", at_sender=True)
+    await import_.send("已成功导入会话", reply_message=True)
 
 
 save = on_command("保存对话", aliases={"保存会话"}, block=True, rule=to_me(), priority=1)
@@ -148,10 +192,14 @@ async def save_conversation(event: MessageEvent, arg: Message = CommandArg()) ->
         await save.finish("当前为公共会话模式, 仅支持群管理操作")
     if session[event]:
         name = arg.extract_plain_text().strip()
-        session.save(name, event)
-        await save.send(f"已将当前会话保存为: {name}", at_sender=True)
+        if not name:
+            session.save_sessions()
+            await save.finish("已保存所有会话记录", reply_message=True)
+        else:
+            session.save(name, event)
+            await save.send(f"已将当前会话保存为: {name}", reply_message=True)
     else:
-        await save.finish("你还没有任何会话记录", at_sender=True)
+        await save.finish("你还没有任何会话记录", reply_message=True)
 
 
 check = on_command("查看对话", aliases={"查看会话"}, block=True, rule=to_me(), priority=1)
@@ -160,7 +208,7 @@ check = on_command("查看对话", aliases={"查看会话"}, block=True, rule=to
 @check.handle()
 async def check_conversation(event: MessageEvent) -> None:
     name_list = "\n".join(list(session.find(event).keys()))
-    await check.send(f"已保存的会话有:\n{name_list}", at_sender=True)
+    await check.send(f"已保存的会话有:\n{name_list}", reply_message=True)
 
 
 switch = on_command("切换对话", aliases={"切换会话"}, block=True, rule=to_me(), priority=1)
@@ -171,19 +219,37 @@ async def switch_conversation(event: MessageEvent, arg: Message = CommandArg()) 
     if not check_purview(event):
         await switch.finish("当前为公共会话模式, 仅支持群管理操作")
     name = arg.extract_plain_text().strip()
+    if not name:
+        await save.finish("请输入会话名称", reply_message=True)
     try:
         session[event] = session.find(event)[name]
-        await switch.send(f"已切换到会话: {name}", at_sender=True)
+        await switch.send(f"已切换到会话: {name}", reply_message=True)
     except KeyError:
-        await switch.send(f"找不到会话: {name}", at_sender=True)
+        await switch.send(f"找不到会话: {name}", reply_message=True)
 
+refresh = on_command("刷新token", block=True, rule=to_me(), permission=SUPERUSER, priority=1)
 
+@refresh.handle()
 @scheduler.scheduled_job("interval", minutes=config.chatgpt_refresh_interval)
 async def refresh_session() -> None:
     await chat_bot.refresh_session()
+    await chat_bot.refresh_session_puid()
     setting.token = chat_bot.session_token
+    setting.puid = chat_bot.plus_puid
     setting.save()
+    session.save_sessions()
+    logger.opt(colors=True).debug(
+        f"\ntoken: {setting.token}"
+        f"\npuid: {setting.puid}"
+    )
 
+clear = on_command("清空对话", aliases={"清空会话"}, block=True, rule=to_me(), permission=SUPERUSER, priority=1)
+
+@clear.handle()
+async def clear_session() -> None:
+    session.clear()
+    session.save_sessions()
+    await clear.finish('已清除所有会话...', reply_message=True)
 
 rollback = on_command("回滚对话", aliases={"回滚会话"}, block=True, rule=to_me(), priority=1)
 
@@ -196,14 +262,14 @@ async def rollback_conversation(event: MessageEvent, arg: Message = CommandArg()
         if session[event]:
             count = session.count(event)
             if num > count:
-                await rollback.finish(f"历史会话数不足，当前历史会话数为{count}", at_sender=True)
+                await rollback.finish(f"历史会话数不足，当前历史会话数为{count}", reply_message=True)
             else:
                 for _ in range(num):
                     session.pop(event)
-                await rollback.send(f"已成功回滚{num}条会话", at_sender=True)
+                await rollback.send(f"已成功回滚{num}条会话", reply_message=True)
         else:
-            await save.finish("你还没有任何会话记录", at_sender=True)
+            await save.finish("你还没有任何会话记录", reply_message=True)
     else:
         await rollback.finish(
-            f"请输入有效的数字，最大回滚数为{config.chatgpt_max_rollback}", at_sender=True
+            f"请输入有效的数字，最大回滚数为{config.chatgpt_max_rollback}", reply_message=True
         )
